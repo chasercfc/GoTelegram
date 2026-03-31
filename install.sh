@@ -3,12 +3,14 @@
 # ============================================
 # gotelegram — MTProto Proxy Manager
 # Ubuntu 24.04 / Docker
+# Поддержка fake-TLS (ee-секреты)
 # ============================================
 
 PORT=2443
 CONTAINER_NAME="mtproto-proxy"
 SECRET_FILE="/etc/mtproto_secret"
-IMAGE="telegrammessenger/proxy:latest"
+DOMAIN_FILE="/etc/mtproto_domain"
+IMAGE="ghcr.io/getpagespeed/mtproxy:latest"
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -28,8 +30,23 @@ get_secret() {
     fi
 }
 
+get_domain() {
+    if [ -f "$DOMAIN_FILE" ]; then
+        cat "$DOMAIN_FILE"
+    else
+        echo "google.com"
+    fi
+}
+
 generate_secret() {
-    openssl rand -hex 16
+    local domain=$1
+    python3 -c "
+import binascii, os
+rand = os.urandom(16).hex()
+domain = '$domain'
+domain_hex = binascii.hexlify(domain.encode()).decode()
+print('ee' + rand + domain_hex)
+"
 }
 
 print_header() {
@@ -38,6 +55,23 @@ print_header() {
     echo "║        gotelegram — MTProto        ║"
     echo "╚════════════════════════════════════╝"
     echo -e "${NC}"
+}
+
+choose_domain() {
+    echo -e "${CYAN}Выберите домен для маскировки:${NC}"
+    echo "  1. google.com (рекомендуется)"
+    echo "  2. github.com"
+    echo "  3. microsoft.com"
+    echo "  4. apple.com"
+    echo ""
+    read -p "Ваш выбор (1-4): " choice
+    case $choice in
+        1) echo "google.com" ;;
+        2) echo "github.com" ;;
+        3) echo "microsoft.com" ;;
+        4) echo "apple.com" ;;
+        *) echo "google.com" ;;
+    esac
 }
 
 show_status() {
@@ -50,9 +84,11 @@ show_status() {
     fi
 
     SECRET=$(get_secret)
+    DOMAIN=$(get_domain)
     if [ -n "$SECRET" ]; then
         IP=$(get_server_ip)
         echo ""
+        echo -e "Домен маскировки: ${DOMAIN}"
         echo -e "Порт: ${PORT}"
         echo -e "Секрет: ${SECRET}"
         echo -e "Ссылка подключения:"
@@ -89,14 +125,16 @@ show_link() {
 update_proxy() {
     echo -e "${YELLOW}Обновляю образ...${NC}"
     docker pull "$IMAGE"
+    SECRET=$(get_secret)
+    DOMAIN=$(get_domain)
     docker stop "$CONTAINER_NAME" 2>/dev/null
     docker rm "$CONTAINER_NAME" 2>/dev/null
-    SECRET=$(get_secret)
     docker run -d \
         --name "$CONTAINER_NAME" \
         --restart always \
         -p "${PORT}:443" \
         -e "SECRET=${SECRET}" \
+        -e "FAKE_TLS_DOMAIN=${DOMAIN}" \
         "$IMAGE"
     if [ $? -eq 0 ]; then
         echo -e "${GREEN}Обновлено и запущено.${NC}"
@@ -114,6 +152,7 @@ remove_proxy() {
         docker rm "$CONTAINER_NAME" 2>/dev/null
         docker rmi "$IMAGE" 2>/dev/null
         rm -f "$SECRET_FILE"
+        rm -f "$DOMAIN_FILE"
         echo -e "${GREEN}Удалено.${NC}"
     else
         echo "Отменено."
@@ -135,8 +174,14 @@ install_proxy() {
         echo -e "Docker: ${GREEN}найден${NC}"
     fi
 
+    # Выбор домена
+    echo ""
+    DOMAIN=$(choose_domain)
+    echo "$DOMAIN" > "$DOMAIN_FILE"
+    echo -e "Домен маскировки: ${GREEN}${DOMAIN}${NC}"
+
     # Генерация секрета
-    SECRET=$(generate_secret)
+    SECRET=$(generate_secret "$DOMAIN")
     echo "$SECRET" > "$SECRET_FILE"
     chmod 600 "$SECRET_FILE"
     echo -e "Секрет сгенерирован: ${GREEN}${SECRET}${NC}"
@@ -148,6 +193,7 @@ install_proxy() {
         --restart always \
         -p "${PORT}:443" \
         -e "SECRET=${SECRET}" \
+        -e "FAKE_TLS_DOMAIN=${DOMAIN}" \
         "$IMAGE"
 
     if [ $? -eq 0 ]; then
@@ -192,7 +238,6 @@ main_menu() {
 # Точка входа
 # ============================================
 
-# Если запущен впервые и контейнер не существует — установка
 if ! docker ps -a --format '{{.Names}}' 2>/dev/null | grep -q "^${CONTAINER_NAME}$" && [ "$1" != "menu" ]; then
     print_header
     echo -e "${YELLOW}MTProto прокси не обнаружен. Запускаю установку...${NC}"
