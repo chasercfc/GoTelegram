@@ -1,10 +1,5 @@
 #!/bin/bash
 
-# ============================================
-# gotelegram — MTProto Proxy Manager
-# Ubuntu 24.04 / Docker / mtg v2
-# ============================================
-
 CONTAINER_NAME="mtproto-proxy"
 SECRET_FILE="/etc/mtproto_secret"
 DOMAIN_FILE="/etc/mtproto_domain"
@@ -34,14 +29,16 @@ get_port() {
 }
 
 generate_secret() {
-    local domain=$1
-    local rand=$(openssl rand -hex 16)
-    local domain_hex=$(echo -n "$domain" | xxd -p | tr -d '\n')
+    local domain="$1"
+    local rand
+    rand=$(openssl rand -hex 16)
+    local domain_hex
+    domain_hex=$(python3 -c "import binascii; print(binascii.hexlify('${domain}'.encode()).decode())")
     echo "ee${rand}${domain_hex}"
 }
 
 show_qr() {
-    local data=$1
+    local data="$1"
     if command -v qrencode &>/dev/null; then
         echo "$data" | qrencode -t UTF8 -o -
     else
@@ -74,34 +71,33 @@ choose_domain() {
     echo ""
     echo " 21)  Ввести свой домен"
     echo ""
-    read -p "Ваш выбор [1-21]: " choice
+    read -p "Ваш выбор [1-21]: " domain_choice
 
-    case $choice in
-        1)  echo "google.com" ;;
-        2)  echo "wikipedia.org" ;;
-        3)  echo "habr.com" ;;
-        4)  echo "github.com" ;;
-        5)  echo "coursera.org" ;;
-        6)  echo "udemy.com" ;;
-        7)  echo "medium.com" ;;
-        8)  echo "stackoverflow.com" ;;
-        9)  echo "bbc.com" ;;
-        10) echo "cnn.com" ;;
-        11) echo "reuters.com" ;;
-        12) echo "nytimes.com" ;;
-        13) echo "lenta.ru" ;;
-        14) echo "rbc.ru" ;;
-        15) echo "ria.ru" ;;
-        16) echo "kommersant.ru" ;;
-        17) echo "stepik.org" ;;
-        18) echo "duolingo.com" ;;
-        19) echo "khanacademy.org" ;;
-        20) echo "ted.com" ;;
+    case $domain_choice in
+        1)  SELECTED_DOMAIN="google.com" ;;
+        2)  SELECTED_DOMAIN="wikipedia.org" ;;
+        3)  SELECTED_DOMAIN="habr.com" ;;
+        4)  SELECTED_DOMAIN="github.com" ;;
+        5)  SELECTED_DOMAIN="coursera.org" ;;
+        6)  SELECTED_DOMAIN="udemy.com" ;;
+        7)  SELECTED_DOMAIN="medium.com" ;;
+        8)  SELECTED_DOMAIN="stackoverflow.com" ;;
+        9)  SELECTED_DOMAIN="bbc.com" ;;
+        10) SELECTED_DOMAIN="cnn.com" ;;
+        11) SELECTED_DOMAIN="reuters.com" ;;
+        12) SELECTED_DOMAIN="nytimes.com" ;;
+        13) SELECTED_DOMAIN="lenta.ru" ;;
+        14) SELECTED_DOMAIN="rbc.ru" ;;
+        15) SELECTED_DOMAIN="ria.ru" ;;
+        16) SELECTED_DOMAIN="kommersant.ru" ;;
+        17) SELECTED_DOMAIN="stepik.org" ;;
+        18) SELECTED_DOMAIN="duolingo.com" ;;
+        19) SELECTED_DOMAIN="khanacademy.org" ;;
+        20) SELECTED_DOMAIN="ted.com" ;;
         21)
-            read -p "Введите домен: " custom_domain
-            echo "$custom_domain"
+            read -p "Введите домен: " SELECTED_DOMAIN
             ;;
-        *)  echo "google.com" ;;
+        *)  SELECTED_DOMAIN="google.com" ;;
     esac
 }
 
@@ -114,24 +110,26 @@ choose_port() {
     echo "  3)  2443"
     echo "  4)  Свой порт"
     echo ""
-    read -p "Выбор: " choice
+    read -p "Выбор: " port_choice
 
-    case $choice in
-        1) echo "443" ;;
-        2) echo "8443" ;;
-        3) echo "2443" ;;
+    case $port_choice in
+        1) SELECTED_PORT="443" ;;
+        2) SELECTED_PORT="8443" ;;
+        3) SELECTED_PORT="2443" ;;
         4)
-            read -p "Введите порт: " custom_port
-            echo "$custom_port"
+            read -p "Введите порт: " SELECTED_PORT
             ;;
-        *) echo "443" ;;
+        *) SELECTED_PORT="443" ;;
     esac
 }
 
 show_connection_data() {
-    local SECRET=$(get_secret)
-    local PORT=$(get_port)
-    local IP=$(get_server_ip)
+    local SECRET
+    SECRET=$(get_secret)
+    local PORT
+    PORT=$(get_port)
+    local IP
+    IP=$(get_server_ip)
 
     echo ""
     echo -e "${CYAN}╔════════════════════════════════════════╗"
@@ -226,17 +224,17 @@ install_proxy() {
     fi
 
     echo ""
-    DOMAIN=$(choose_domain)
-    echo "$DOMAIN" > "$DOMAIN_FILE"
-    echo -e "  Домен: ${GREEN}${DOMAIN}${NC}"
+    choose_domain
+    echo "$SELECTED_DOMAIN" > "$DOMAIN_FILE"
+    echo -e "  Домен: ${GREEN}${SELECTED_DOMAIN}${NC}"
 
-    PORT=$(choose_port)
-    echo "$PORT" > "$PORT_FILE"
-    echo -e "  Порт: ${GREEN}${PORT}${NC}"
+    choose_port
+    echo "$SELECTED_PORT" > "$PORT_FILE"
+    echo -e "  Порт: ${GREEN}${SELECTED_PORT}${NC}"
 
     echo ""
     echo "  Генерирую секрет..."
-    SECRET=$(generate_secret "$DOMAIN")
+    SECRET=$(generate_secret "$SELECTED_DOMAIN")
     echo "$SECRET" > "$SECRET_FILE"
     chmod 600 "$SECRET_FILE"
     echo -e "  Секрет: ${GREEN}${SECRET}${NC}"
@@ -253,12 +251,12 @@ install_proxy() {
     docker run -d \
         --name "$CONTAINER_NAME" \
         --restart always \
-        -p "${PORT}:${PORT}" \
+        -p "${SELECTED_PORT}:${SELECTED_PORT}" \
         "$IMAGE" \
         simple-run \
         -n 1.1.1.1 \
         -i prefer-ipv4 \
-        "0.0.0.0:${PORT}" \
+        "0.0.0.0:${SELECTED_PORT}" \
         "$SECRET"
 
     if [ $? -eq 0 ]; then
@@ -306,10 +304,6 @@ main_menu() {
         esac
     done
 }
-
-# ============================================
-# Точка входа
-# ============================================
 
 if ! docker ps -a --format '{{.Names}}' 2>/dev/null | grep -q "^${CONTAINER_NAME}$"; then
     print_header
